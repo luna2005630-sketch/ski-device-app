@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'createdAt', 'updatedAt'])
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.displayName is string;
+      allow delete: if false;
+
+      match /rentals/{rentalId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && request.resource.data.keys().hasOnly(['items', 'status', 'startedAt', 'createdAt'])
+          && request.resource.data.status == 'active'
+          && request.resource.data.items is map
+          && request.resource.data.startedAt == request.time
+          && request.resource.data.createdAt == request.time;
+        allow update: if isOwner(uid)
+          && request.resource.data.items == resource.data.items
+          && ((resource.data.status == 'active'
+            && request.resource.data.status == 'returned'
+            && request.resource.data.returnedItems == resource.data.items
+            && request.resource.data.earnedPoints == (resource.data.items.ski + resource.data.items.boots + resource.data.items.poles) * 10
+            && request.resource.data.durationMinutes is int
+            && request.resource.data.durationMinutes > 0
+            && request.resource.data.totalAmount is int
+            && request.resource.data.totalAmount >= 0
+            && request.resource.data.returnedAt == request.time
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'returnedItems', 'durationMinutes', 'earnedPoints', 'totalAmount', 'returnedAt', 'updatedAt']))
+          || (resource.data.status == 'returned'
+            && request.resource.data.status == 'paid'
+            && request.resource.data.earnedPoints == resource.data.earnedPoints
+            && request.resource.data.payment is map
+            && request.resource.data.payment.keys().hasOnly(['method', 'usedPoints', 'amount'])
+            && request.resource.data.payment.method in ['bank', 'card']
+            && request.resource.data.payment.usedPoints is int
+            && request.resource.data.payment.usedPoints >= 0
+            && request.resource.data.payment.amount == resource.data.totalAmount - request.resource.data.payment.usedPoints
+            && request.resource.data.paidAt == request.time
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'payment', 'paidAt', 'updatedAt'])));
+        allow delete: if false;
+      }
+    }
+  }
+}
